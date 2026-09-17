@@ -23,26 +23,43 @@ plan markups for a person to review and publish in the app.
 Runs entirely on your own machine and talks to the app only through its
 HTTPS API, signed in as you. Nothing is installed on the server.
 
+### From a checkout, in its own venv (macOS)
+
 ```
-pipx install git+https://github.com/cawka/a2contracts-mcp      # or: pip install ... in a venv of your own
-a2contracts-mcp login --url https://contracts.a2cons.com      # email, password, MFA code
-a2contracts-mcp check                                         # who you are, what you may do
+git clone git@github.com:cawka/a2contracts-mcp.git
+cd a2contracts-mcp
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/a2contracts-mcp login --url https://contracts.a2cons.com   # email, password, MFA code
+.venv/bin/a2contracts-mcp check                                      # who you are, what you may do
+```
+
+Then register it with Claude Code using the venv's own executable (a
+full path -- Claude Code launches it outside this shell):
+
+```
+claude mcp add a2contracts -- "$PWD/.venv/bin/a2contracts-mcp" serve
+```
+
+Claude Desktop / others: point the stdio server at
+`/full/path/to/a2contracts-mcp/.venv/bin/a2contracts-mcp` with the
+argument `serve`.
+
+Updating: `git pull && .venv/bin/pip install -e .` (the `-e` install
+means code changes are picked up without reinstalling; the reinstall is
+only for new dependencies).
+
+### Or with pipx
+
+```
+pipx install git+https://github.com/cawka/a2contracts-mcp
+a2contracts-mcp login --url https://contracts.a2cons.com
+claude mcp add a2contracts -- a2contracts-mcp serve
 ```
 
 Tokens are stored in `~/.config/a2contracts-mcp/credentials.json`
 (rotated automatically); downloaded sheets are cached in
 `~/.cache/a2contracts-mcp/`.
-
-Claude Code:
-
-```
-claude mcp add a2contracts -- a2contracts-mcp serve
-```
-
-Claude Desktop / others: run `a2contracts-mcp serve` as a stdio server.
-
-From a checkout: `python3 -m venv .venv && .venv/bin/pip install -e .`
-and use `.venv/bin/a2contracts-mcp` in place of the bare command.
 
 ## Tools
 
