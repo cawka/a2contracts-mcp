@@ -216,7 +216,7 @@ def create_layer(project: int, name: str, color: str = '#7b3fa0', visible_to_cli
         return _err(exc)
 
 
-KINDS = {'pen', 'highlighter', 'line', 'arrow', 'rect', 'ellipse', 'cloud', 'polygon', 'text', 'length', 'multiline', 'area', 'count', 'marker'}
+KINDS = {'pen', 'highlighter', 'line', 'arrow', 'rect', 'ellipse', 'cloud', 'polygon', 'text', 'length', 'multiline', 'area', 'count', 'marker', 'stamp'}
 
 
 @mcp.tool()
@@ -225,13 +225,15 @@ def create_markups(sheet_id: int, layer_id: int, markups: list[dict], image_mapp
     until a person publishes them in the app -- there is no publish tool).
 
     Each item: {"kind": one of pen|highlighter|line|arrow|rect|ellipse|
-    cloud|polygon|text|length|multiline|area|count|marker,
+    cloud|polygon|text|length|multiline|area|count|marker|stamp,
     "points": [[x, y], ...], optional "style": {"color", "width", "fill",
-    "font_size"}, "label", "subject" (counts with the same subject form
-    one group, e.g. "Duplex outlet"), "meta": {"text"} for text or
-    {"title", "notes"} for a marker}.
-    rect/ellipse/cloud/text take two opposite corners; count/marker take
-    one point; length takes two; area/polygon three or more.
+    "font_size", "size" (stamp glyph height, pt)}, "label", "subject"
+    (counts and stamps with the same subject form one group, e.g.
+    "Duplex outlet"), "meta": {"text"} for text, {"title", "notes"} for a
+    marker, {"symbol": id} for a stamp (ids: GET /api/plan-symbols/ via
+    api_get, e.g. duplex-outlet, switch, recessed-light, smoke-detector)}.
+    rect/ellipse/cloud/text take two opposite corners; count/marker/stamp
+    take one point; length takes two; area/polygon three or more.
 
     Points are PDF points unless `image_mapping` (the JSON render_sheet
     returned) is given -- then they are pixels of that image and are
