@@ -24,7 +24,7 @@ Runs entirely on your own machine and talks to the app only through its
 HTTPS API, signed in as you. Nothing is installed on the server.
 
 ```
-pipx install git+https://github.com/<org>/a2contracts-mcp      # or: pip install ... in a venv of your own
+pipx install git+https://github.com/cawka/a2contracts-mcp      # or: pip install ... in a venv of your own
 a2contracts-mcp login --url https://contracts.a2cons.com      # email, password, MFA code
 a2contracts-mcp check                                         # who you are, what you may do
 ```
