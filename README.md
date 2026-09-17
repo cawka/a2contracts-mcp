@@ -20,11 +20,13 @@ plan markups for a person to review and publish in the app.
 
 ## Setup
 
+Runs entirely on your own machine and talks to the app only through its
+HTTPS API, signed in as you. Nothing is installed on the server.
+
 ```
-cd mcp
-python3 -m venv .venv && .venv/bin/pip install -e .
-.venv/bin/a2contracts-mcp login --url https://contracts.a2cons.com   # email, password, MFA code
-.venv/bin/a2contracts-mcp check
+pipx install git+https://github.com/<org>/a2contracts-mcp      # or: pip install ... in a venv of your own
+a2contracts-mcp login --url https://contracts.a2cons.com      # email, password, MFA code
+a2contracts-mcp check                                         # who you are, what you may do
 ```
 
 Tokens are stored in `~/.config/a2contracts-mcp/credentials.json`
@@ -34,10 +36,13 @@ Tokens are stored in `~/.config/a2contracts-mcp/credentials.json`
 Claude Code:
 
 ```
-claude mcp add a2contracts -- /full/path/to/a2cons-contracts/mcp/.venv/bin/a2contracts-mcp serve
+claude mcp add a2contracts -- a2contracts-mcp serve
 ```
 
-Claude Desktop / others: run `.../a2contracts-mcp serve` as a stdio server.
+Claude Desktop / others: run `a2contracts-mcp serve` as a stdio server.
+
+From a checkout: `python3 -m venv .venv && .venv/bin/pip install -e .`
+and use `.venv/bin/a2contracts-mcp` in place of the bare command.
 
 ## Tools
 
