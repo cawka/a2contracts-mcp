@@ -45,9 +45,27 @@ Claude Desktop / others: point the stdio server at
 `/full/path/to/a2contracts-mcp/.venv/bin/a2contracts-mcp` with the
 argument `serve`.
 
-Updating: `git pull && .venv/bin/pip install -e .` (the `-e` install
-means code changes are picked up without reinstalling; the reinstall is
-only for new dependencies).
+### Keeping it up to date
+
+The app and this server move together: a new tool here usually goes
+with an endpoint there, so update this whenever the app is deployed (a
+tool answering `404` or "unknown field" is the usual sign you're behind).
+Releases are git tags (`v0.2.0`, …); `main` is always deployable.
+
+From the checkout:
+
+```
+cd ~/Devel/a2contracts-mcp
+git pull
+.venv/bin/pip install -e .          # picks up new dependencies; code changes need no reinstall
+.venv/bin/a2contracts-mcp --version
+```
+
+then start a new Claude Code session -- MCP servers are launched per
+session, so a running one keeps the old code until restarted (in Claude
+Code, `/mcp` shows the connected servers). Your login survives updates
+(tokens live in `~/.config`, not in the checkout). With pipx:
+`pipx install --force git+https://github.com/cawka/a2contracts-mcp`.
 
 ### Or with pipx
 
@@ -60,6 +78,21 @@ claude mcp add a2contracts -- a2contracts-mcp serve
 Tokens are stored in `~/.config/a2contracts-mcp/credentials.json`
 (rotated automatically); downloaded sheets are cached in
 `~/.cache/a2contracts-mcp/`.
+
+## What it will and will not do
+
+Reads go through `api_get` (any GET the signed-in user is allowed) and
+the purpose-built tools below. Writes exist only as named tools, for two
+draft areas: plan markups (private drafts until a person publishes) and
+draft estimates (divisions and line items while the proposal is not
+finalized, and line items on a pending change order). There is no
+general-purpose write call, and deliberately no tool to finalize or
+un-finalize a proposal, approve or reopen a change order, submit a pay
+app, or touch contracts, subcontracts, lien releases or payments --
+those record financial agreements and only a person locks or unlocks
+them, in the app. The API enforces the same locks server-side (a
+finalized proposal's line items are refused), so the tools cannot be
+used past that line either.
 
 ## Tools
 
@@ -74,6 +107,14 @@ Draft: `create_layer`, `create_markups(sheet_id, layer_id, markups,
 image_mapping)` (points in PDF points, or image pixels with the mapping
 `render_sheet` returned), `update_markup`, `delete_markups`,
 `clear_my_markups`, `set_sheet_scale` (needs publish rights).
+
+Draft estimates: `get_estimate(project)` (divisions, line items, pending
+change orders, totals, and whether it is still editable),
+`create_division(project, name, items, csi_code)`, `update_division`,
+`delete_division`, `create_line_items(division_id, items,
+change_order_id)`, `update_line_item(id, patch)`, `delete_line_items`.
+Item shape: `{title, description, qty, unit, unit_cost, cost_type
+(material|labor|subcontractor|equipment|other), is_allowance}`.
 
 Typical flow: `list_projects` → `list_plan_sheets` → `get_sheet_info` →
 `render_sheet` (whole page at ~40 dpi to orient, then crops at 100–150

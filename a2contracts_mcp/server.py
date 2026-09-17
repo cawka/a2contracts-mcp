@@ -4,6 +4,15 @@ can draft markups only if that user can annotate, and it can never
 publish -- there is deliberately no publish tool. A human reviews the
 "Suggested" layer in the app and publishes what's right.
 
+The same line holds for estimates (the owner, 2026-09-17): "all draft
+modes are fair game, anything that touches 'final' (related to actual
+financial agreements) is hard no" -- and locking itself is a human act.
+So there are tools to read an estimate and to add/change/remove
+divisions and line items while the proposal is a draft (the API refuses
+the writes once it is finalized, or on a change order that is no longer
+pending), and none to finalize/un-finalize a proposal, approve a change
+order, submit a pay app, or touch contracts, subcontracts or releases.
+
 Coordinates: every markup point is in PDF points of the page, origin
 top-left (the app's own convention). `render_sheet` returns the mapping
 from image pixels back to points; `create_markups` accepts pixel
@@ -27,7 +36,14 @@ mcp = MCPServer(
         'images, and draft plan markups (counts, markers, shapes, measurements) on a layer for a person to '
         'review and publish. Markup coordinates are PDF points (origin top-left); render_sheet tells you '
         'how image pixels map to points. Start with list_projects, then list_plan_sheets, then '
-        'get_sheet_info before drawing.'
+        'get_sheet_info before drawing. Draft estimates (proposals) can be read and edited '
+        '(divisions, line items) with get_estimate / create_line_items etc. while they are still '
+        'drafts. FORBIDDEN, by design and not merely missing: finalizing or un-finalizing a proposal, '
+        'approving or reopening a change order, submitting a pay app, and anything on contracts, '
+        'subcontracts, lien releases or payments -- those record real financial agreements and only a '
+        'person may lock or unlock them, in the app. This server has no general-purpose write call '
+        '(api_get is read-only), so do not look for another route; if a task needs one of those steps, '
+        'stop and tell the person what to do in the app.'
     ),
 )
 
@@ -336,6 +352,150 @@ def set_sheet_scale(sheet_id: int, ratio: float, source: str = 'sheet') -> str:
     """
     try:
         return _ok(client().patch(f'/api/plan-sheets/{sheet_id}/', json={'scale_ratio': str(ratio), 'scale_source': source if source in ('sheet', 'preset', 'calibrated') else 'preset'}))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+# --- Draft estimates ---------------------------------------------------------
+
+@mcp.tool()
+def get_estimate(project: int) -> str:
+    """The project's estimate: proposal status (finalized_at, null while
+    it is a draft and editable), every division with its line items
+    (id, item_no, title, description, qty, unit, unit_cost, line_total,
+    cost_type, is_allowance, change_order), pending change orders (their
+    line items are editable too), and the totals."""
+    try:
+        c = client()
+        proj = c.get(f'/api/projects/{project}/')
+        divisions = c.get('/api/divisions/', params={'project': project})
+        items = c.get('/api/line-items/', params={'project': project})
+        change_orders = c.get('/api/change-orders/', params={'project': project})
+        by_division: dict[int, list] = {}
+        for it in items:
+            by_division.setdefault(it['division'], []).append(it)
+        keep = ('id', 'item_no', 'title', 'description', 'qty', 'unit', 'unit_cost', 'line_total', 'cost_type', 'is_allowance', 'change_order', 'sort_order')
+        out = {
+            'project': {'id': project, 'name': proj['name'], 'proposal_finalized_at': proj.get('proposal_finalized_at')},
+            'editable': proj.get('proposal_finalized_at') is None,
+            'divisions': [
+                {
+                    'id': d['id'], 'csi_code': d.get('csi_code', ''), 'name': d['name'], 'sort_order': d.get('sort_order'),
+                    'line_items': [{k: it.get(k) for k in keep} for it in sorted(by_division.get(d['id'], []), key=lambda x: (x.get('sort_order') or 0, x['id']))],
+                }
+                for d in sorted(divisions, key=lambda x: (x.get('sort_order') or 0, x['id']))
+            ],
+            'change_orders': [
+                {'id': co['id'], 'number': co.get('number'), 'name': co.get('name'), 'status': co.get('status'), 'editable': co.get('status') == 'pending'}
+                for co in change_orders
+            ],
+        }
+        try:
+            out['totals'] = c.get('/api/project-rollup/', params={'project': project})
+        except Exception:  # noqa: BLE001 -- totals are a nicety
+            pass
+        return _ok(out)
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def create_division(project: int, name: str, items: list[dict], csi_code: str = '', sort_order: int | None = None) -> str:
+    """Add a division (a section of the estimate, e.g. csi_code "09",
+    name "Finishes") to a draft proposal together with its first line
+    items (same item shape as create_line_items; at least one -- the app
+    does not keep an empty division). Returns the division and the rows."""
+    if not items:
+        return _ok({'error': 'Give at least one line item; an empty division is removed by the app.'})
+    try:
+        if client().get(f'/api/projects/{project}/').get('proposal_finalized_at') is not None:
+            return _ok({'error': 'This proposal has been finalized -- it is no longer a draft. New scope goes through a change order, which a person creates in the app.'})
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+    body: dict = {'project': project, 'name': name, 'csi_code': csi_code}
+    if sort_order is not None:
+        body['sort_order'] = sort_order
+    try:
+        c = client()
+        division = c.post('/api/divisions/', json=body)
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+    created, errors = [], []
+    for item in items:
+        try:
+            created.append(c.post('/api/line-items/', json={'division': division['id'], **item}))
+        except Exception as exc:  # noqa: BLE001
+            errors.append({'item': item, 'error': exc.detail if isinstance(exc, ApiError) else str(exc)})
+    return _ok({'division': division, 'created': created, 'errors': errors})
+
+
+@mcp.tool()
+def update_division(division_id: int, name: str | None = None, csi_code: str | None = None, sort_order: int | None = None) -> str:
+    """Rename / renumber / reorder a division of a draft proposal."""
+    body = {k: v for k, v in {'name': name, 'csi_code': csi_code, 'sort_order': sort_order}.items() if v is not None}
+    try:
+        return _ok(client().patch(f'/api/divisions/{division_id}/', json=body))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def create_line_items(division_id: int, items: list[dict], change_order_id: int | None = None) -> str:
+    """Add line items to a division of a draft proposal (or, with
+    change_order_id, to a PENDING change order). Each item: {"title",
+    optional "description", "qty" (number), "unit" (e.g. "EA", "LF",
+    "SF", "LS"), "unit_cost" (number, dollars), "cost_type" one of
+    material|labor|subcontractor|equipment|other, "is_allowance" (bool)}.
+    Returns the created rows (with item_no and line_total). Refused once
+    the proposal is finalized -- a person adds scope through a change
+    order then."""
+    created, errors = [], []
+    c = client()
+    for item in items:
+        body = {'division': division_id, **item}
+        if change_order_id is not None:
+            body['change_order'] = change_order_id
+        try:
+            created.append(c.post('/api/line-items/', json=body))
+        except Exception as exc:  # noqa: BLE001
+            errors.append({'item': item, 'error': exc.detail if isinstance(exc, ApiError) else str(exc)})
+    return _ok({'created': created, 'errors': errors})
+
+
+@mcp.tool()
+def update_line_item(line_item_id: int, patch: dict) -> str:
+    """Change fields of a line item on a draft proposal or pending change
+    order: any of title, description, qty, unit, unit_cost, cost_type,
+    is_allowance, sort_order, division (move). Locked items (finalized
+    proposal, decided change order, billed on a pay app) are refused."""
+    try:
+        return _ok(client().patch(f'/api/line-items/{line_item_id}/', json=patch))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def delete_line_items(line_item_ids: list[int]) -> str:
+    """Remove line items from a draft proposal / pending change order.
+    Same locks as update_line_item; a division's last item cannot be
+    removed (delete the division instead, or replace the item)."""
+    results = []
+    for lid in line_item_ids:
+        try:
+            client().delete(f'/api/line-items/{lid}/')
+            results.append({'id': lid, 'deleted': True})
+        except Exception as exc:  # noqa: BLE001
+            results.append({'id': lid, 'deleted': False, 'error': exc.detail if isinstance(exc, ApiError) else str(exc)})
+    return _ok(results)
+
+
+@mcp.tool()
+def delete_division(division_id: int) -> str:
+    """Remove a division of a draft proposal together with its line items.
+    Refused once the proposal is finalized."""
+    try:
+        client().delete(f'/api/divisions/{division_id}/')
+        return _ok({'id': division_id, 'deleted': True})
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 

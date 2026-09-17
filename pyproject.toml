@@ -1,6 +1,6 @@
 [project]
 name = "a2contracts-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for A2 Contracts: lets an external agent (Claude Code, Claude, Gemini) read projects and plans and draft plan markups through the app's own REST API."
 requires-python = ">=3.11"
 dependencies = [

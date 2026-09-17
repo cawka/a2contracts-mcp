@@ -54,7 +54,10 @@ def serve(_args) -> int:
 
 
 def main() -> None:
+    from importlib.metadata import version
+
     parser = argparse.ArgumentParser(prog='a2contracts-mcp')
+    parser.add_argument('--version', action='version', version=f'a2contracts-mcp {version("a2contracts-mcp")}')
     sub = parser.add_subparsers(dest='command', required=True)
     p_login = sub.add_parser('login', help='sign in and store a device token')
     p_login.add_argument('--url', required=True, help='e.g. https://contracts.a2cons.com or http://localhost:8000')
