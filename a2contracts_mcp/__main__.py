@@ -36,10 +36,12 @@ def login(args) -> int:
 
 
 def check(_args) -> int:
+    from . import TRACKS_APP_COMMIT
     from .client import ApiClient
 
     c = ApiClient()
     me = c.get('/api/auth/me/')
+    print(f'a2contracts-mcp written against app commit {TRACKS_APP_COMMIT}')
     role = me.get('role') or {}
     print(f"{me.get('email')} · {me.get('company_name', '')} · role {role.get('name')}")
     print(f"view plans: {role.get('can_view_plans')} · annotate: {role.get('can_annotate_plans')} · publish: {role.get('can_publish_plan_markups')} · share plans: {role.get('can_share_plans')}")

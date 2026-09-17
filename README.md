@@ -50,7 +50,11 @@ argument `serve`.
 The app and this server move together: a new tool here usually goes
 with an endpoint there, so update this whenever the app is deployed (a
 tool answering `404` or "unknown field" is the usual sign you're behind).
-Releases are git tags (`v0.2.0`, …); `main` is always deployable.
+There are no releases -- `main` is what you run. Which app version the
+tools were written against is recorded in `a2contracts_mcp/__init__.py`
+(`TRACKS_APP_COMMIT`, the a2cons-contracts backend commit) and printed
+by `a2contracts-mcp check`; it is bumped whenever the tools change to
+follow an API change.
 
 From the checkout:
 
