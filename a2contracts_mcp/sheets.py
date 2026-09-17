@@ -1,10 +1,11 @@
-"""Plan sheets as an agent needs them: the PDF fetched once through the
-app's own temporary-link endpoint and cached locally, then rasterized
-(pypdfium2) at a requested dpi, optionally cropped -- with the exact
-mapping back to PDF points, which is the coordinate space every markup
-is stored in. Text extraction for scale detection uses the same file."""
+"""Plan sheets as an agent needs them: the sheet's stored page (one
+PDF per sheet since the app took over plan storage, 2026-09-17 --
+/api/plan-sheets/<id>/file.pdf) fetched once and cached locally by the
+page's content hash, then rasterized (pypdfium2) at a requested dpi,
+optionally cropped -- with the exact mapping back to PDF points, which
+is the coordinate space every markup is stored in. Text extraction for
+scale detection uses the same file."""
 
-import hashlib
 import io
 import re
 
@@ -17,20 +18,26 @@ from .client import ApiClient
 POINTS_PER_INCH = 72
 
 
-def _cached_pdf(client: ApiClient, project: int, path: str, modified: str | None) -> bytes:
-    key = hashlib.sha256(f'{project}|{path}|{modified or ""}'.encode()).hexdigest()
+def get_sheet(client: ApiClient, sheet_id: int) -> dict:
+    return client.get(f'/api/plan-sheets/{sheet_id}/')
+
+
+def _cached_pdf(client: ApiClient, sheet: dict) -> bytes:
+    version = sheet.get('current_version') or {}
+    if not version:
+        raise RuntimeError(f"Sheet {sheet['id']} has no stored page yet (still importing, or a Dropbox-era row -- run the app's Dropbox sync).")
     config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cached = config.CACHE_DIR / f'{key}.pdf'
+    cached = config.CACHE_DIR / f"{version['page_sha256']}.pdf"
     if cached.exists():
         return cached.read_bytes()
-    link = client.get(f'/api/projects/{project}/plans/link/', params={'path': path})['link']
-    data = client.download(link)
+    data = client.get_bytes(f"/api/plan-sheets/{sheet['id']}/file.pdf")
     cached.write_bytes(data)
     return data
 
 
-def open_document(client: ApiClient, project: int, path: str, modified: str | None = None) -> pdfium.PdfDocument:
-    return pdfium.PdfDocument(_cached_pdf(client, project, path, modified))
+def open_document(client: ApiClient, sheet: dict) -> pdfium.PdfDocument:
+    """The sheet's current version as a one-page document (page 1)."""
+    return pdfium.PdfDocument(_cached_pdf(client, sheet))
 
 
 def page_size_pt(doc: pdfium.PdfDocument, page: int) -> tuple[float, float]:

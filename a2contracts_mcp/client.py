@@ -70,3 +70,13 @@ class ApiClient:
         r = self.http.get(url, follow_redirects=True)
         r.raise_for_status()
         return r.content
+
+    def get_bytes(self, path: str, retry=True) -> bytes:
+        """An authenticated binary GET of an app path (a stored plan
+        sheet's PDF, /api/plan-sheets/<id>/file.pdf)."""
+        r = self.http.get(f'{self.base}{path}', headers={'Authorization': f"Bearer {self.creds['access_token']}"})
+        if r.status_code == 401 and retry and self._refresh():
+            return self.get_bytes(path, retry=False)
+        if r.status_code >= 400:
+            raise ApiError(r.status_code, r.text[:500])
+        return r.content

@@ -100,12 +100,16 @@ used past that line either.
 
 ## Tools
 
-Read: `list_projects`, `list_plan_sheets(project)`, `get_sheet_info(project,
-path, page)` (creates the sheet record; reports size, scale in force and
-the scale printed on the sheet, units, layers), `get_sheet_text`,
-`render_sheet(project, path, page, dpi, x, y, width, height, max_px)` →
-PNG + the pixel→point mapping, `list_layers`, `list_markups(sheet_id)`,
-`list_symbols`, `api_get(path)` (any GET).
+Read: `list_projects`, `list_plan_sheets(project, collection?)`
+(collections → folders → sheets, each with its `sheet_id`, number,
+title, current version), `get_sheet_info(sheet_id)` (size, scale in
+force and the scale printed on the sheet, units, layers),
+`get_sheet_text(sheet_id)`, `render_sheet(sheet_id, dpi, x, y, width,
+height, max_px)` → PNG + the pixel→point mapping, `list_layers`,
+`list_markups(sheet_id)`, `list_symbols`, `api_get(path)` (any GET).
+Sheets are the app's own stored pages (one per sheet, the current
+version) since the app took over plan storage from Dropbox on
+2026-09-17 -- there is no path/page any more, only `sheet_id`.
 
 Draft: `create_layer`, `create_markups(sheet_id, layer_id, markups,
 image_mapping)` (points in PDF points, or image pixels with the mapping

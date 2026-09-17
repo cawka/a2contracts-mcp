@@ -79,7 +79,6 @@ def list_projects(include_archived: bool = False) -> str:
             {
                 'id': r['local_id'], 'name': r['name'], 'project_number': r.get('project_number', ''),
                 'client': r.get('client_display_name', ''), 'address': ', '.join(p for p in [r.get('address_line1'), r.get('city'), r.get('state')] if p),
-                'has_plans_folder': bool(r.get('dropbox_folder_path')),
             }
             for r in rows
         ])
@@ -88,60 +87,65 @@ def list_projects(include_archived: bool = False) -> str:
 
 
 @mcp.tool()
-def list_plan_sheets(project: int) -> str:
-    """The project's plan files (from its Dropbox Plans/ folder) with
-    folder, name, path, modified -- plus, for pages the app already
-    knows, the sheet record (sheet_id, page, title, scale). Pass `path`
-    (and page) to the sheet tools."""
+def list_plan_sheets(project: int, collection: int | None = None) -> str:
+    """The project's plan sheets as the app stores them: collections
+    (a permit set each; one default) -> folders -> sheets. Each sheet:
+    sheet_id (pass this to every sheet tool), sheet_number, title,
+    folder, current version (number, date), page size, scale. Pass
+    `collection` to list just one."""
     try:
-        files = client().get(f'/api/projects/{project}/plans/')
-        known = client().get('/api/plan-sheets/', params={'project': project})
-        by_path: dict[str, list] = {}
-        for s in known:
-            by_path.setdefault(s['dropbox_path'].lower(), []).append({
-                'sheet_id': s['id'], 'page': s['page'], 'title': s['title'], 'sheet_number': s['sheet_number'],
-                'scale_ratio': s['scale_ratio'], 'scale_source': s['scale_source'],
+        c = client()
+        collections = c.get('/api/plan-collections/', params={'project': project})
+        folders = {f['id']: f['name'] for f in c.get('/api/plan-folders/', params={'project': project})}
+        sheets_ = c.get('/api/plan-sheets/', params={'project': project})
+        out = []
+        for col in collections:
+            if collection is not None and col['id'] != collection:
+                continue
+            rows = [s for s in sheets_ if s.get('collection') == col['id']]
+            rows.sort(key=lambda s: (folders.get(s.get('folder'), '') if s.get('folder') else '', s.get('sheet_number') or '', s.get('title') or ''))
+            out.append({
+                'collection_id': col['id'], 'collection': col['name'], 'is_default': col['is_default'],
+                'sheets': [
+                    {
+                        'sheet_id': s['id'], 'sheet_number': s['sheet_number'], 'title': s['title'],
+                        'folder': folders.get(s['folder']) if s.get('folder') else None,
+                        'version': (s.get('current_version') or {}).get('number'),
+                        'version_date': (s.get('current_version') or {}).get('issued_on'),
+                        'page_width_pt': s.get('page_width_pt'), 'page_height_pt': s.get('page_height_pt'),
+                        'scale_ratio': s['scale_ratio'], 'scale_source': s['scale_source'],
+                        'stored': bool(s.get('current_version')),
+                    }
+                    for s in rows
+                ],
             })
-        return _ok([
-            {'folder': f.get('folder'), 'name': f['name'], 'path': f['path'], 'modified': f.get('modified'), 'sheets': by_path.get(f['path'].lower(), [])}
-            for f in files
-        ])
+        return _ok(out)
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
 
 @mcp.tool()
-def get_sheet_info(project: int, path: str, page: int = 1) -> str:
-    """Everything about one plan page: sheet_id (created if needed), page
-    count, size in points, the scale in force (and the scale printed on
-    the sheet if none is set), measurement units, layers, and how many
-    markups are on it. Call this before rendering or drawing."""
+def get_sheet_info(sheet_id: int) -> str:
+    """Everything about one sheet: number, title, size in points, the
+    scale in force (and the scale printed on the sheet if none is set),
+    measurement units, layers, and how many markups are on it. Call this
+    before rendering or drawing."""
     try:
         c = client()
-        doc = sheets.open_document(c, project, path)
-        page_count = len(doc)
-        width, height = sheets.page_size_pt(doc, page)
-        try:
-            sheet = c.post('/api/plan-sheets/ensure/', json={
-                'project': project, 'dropbox_path': path, 'page': page,
-                'page_width_pt': round(width, 2), 'page_height_pt': round(height, 2),
-            })
-        except ApiError as exc:
-            if exc.status not in (403, 404):
-                raise
-            found = c.get('/api/plan-sheets/', params={'project': project, 'dropbox_path': path, 'page': page})
-            sheet = found[0] if found else None
-        detected = sheets.detect_scale(sheets.page_text(doc, page))
-        layers = c.get('/api/plan-layers/', params={'project': project})
+        sheet = sheets.get_sheet(c, sheet_id)
+        doc = sheets.open_document(c, sheet)
+        width, height = sheets.page_size_pt(doc, 1)
+        detected = sheets.detect_scale(sheets.page_text(doc, 1))
+        layers = c.get('/api/plan-layers/', params={'project': sheet['project']})
         company = c.get('/api/company/')
-        markups = c.get('/api/plan-markups/', params={'sheet': sheet['id']}) if sheet else []
+        markups = c.get('/api/plan-markups/', params={'sheet': sheet_id})
+        version = sheet.get('current_version') or {}
         return _ok({
-            'sheet_id': sheet['id'] if sheet else None,
-            'title': sheet['title'] if sheet else None,
-            'page': page, 'page_count': page_count,
+            'sheet_id': sheet['id'], 'sheet_number': sheet['sheet_number'], 'title': sheet['title'],
+            'version': version.get('number'), 'version_date': version.get('issued_on'),
             'page_width_pt': round(width, 2), 'page_height_pt': round(height, 2),
-            'scale_ratio': float(sheet['scale_ratio']) if sheet and sheet['scale_ratio'] else None,
-            'scale_source': sheet['scale_source'] if sheet else '',
+            'scale_ratio': float(sheet['scale_ratio']) if sheet['scale_ratio'] else None,
+            'scale_source': sheet['scale_source'],
             'scale_printed_on_sheet': detected,
             'units': company.get('measurement_units', 'ft_in'),
             'layers': [{'id': l['id'], 'name': l['name'], 'color': l['color'], 'locked': l['is_locked']} for l in layers],
@@ -153,34 +157,35 @@ def get_sheet_info(project: int, path: str, page: int = 1) -> str:
 
 
 @mcp.tool()
-def get_sheet_text(project: int, path: str, page: int = 1, max_chars: int = 20000) -> str:
-    """The page's own text (title block, room names, schedules, notes) --
-    from the PDF's text layer, so only for vector sheets. Handy for scale
-    detection and for reading legends before counting symbols."""
+def get_sheet_text(sheet_id: int, max_chars: int = 20000) -> str:
+    """The sheet's own text (title block, room names, schedules, notes)
+    -- from the PDF's text layer, so only for vector sheets. Handy for
+    scale detection and for reading legends before counting symbols."""
     try:
-        doc = sheets.open_document(client(), project, path)
-        text = sheets.page_text(doc, page)
-        return text[:max_chars]
+        c = client()
+        doc = sheets.open_document(c, sheets.get_sheet(c, sheet_id))
+        return sheets.page_text(doc, 1)[:max_chars]
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
 
 @mcp.tool()
 def render_sheet(
-    project: int, path: str, page: int = 1, dpi: float = 72,
+    sheet_id: int, dpi: float = 72,
     x: float | None = None, y: float | None = None, width: float | None = None, height: float | None = None,
     max_px: int = 2000,
 ) -> list:
-    """A PNG of the page, or of a crop of it (x, y, width, height in PDF
+    """A PNG of the sheet, or of a crop of it (x, y, width, height in PDF
     points, origin top-left). Returns the image plus a JSON mapping:
     pt = origin_pt + px * pt_per_px. For a large sheet, look at the whole
     page at low dpi first, then render crops of the areas you care about
     at 100-150 dpi; keep max_px at what your vision input handles well.
     """
     try:
-        doc = sheets.open_document(client(), project, path)
+        c = client()
+        doc = sheets.open_document(c, sheets.get_sheet(c, sheet_id))
         crop = (x, y, width, height) if None not in (x, y, width, height) else None
-        png, mapping = sheets.render(doc, page, dpi=dpi, crop_pt=crop, max_px=max_px)  # type: ignore[arg-type]
+        png, mapping = sheets.render(doc, 1, dpi=dpi, crop_pt=crop, max_px=max_px)  # type: ignore[arg-type]
         return [Image(data=png, format='png'), _ok(mapping)]
     except Exception as exc:  # noqa: BLE001
         return [_err(exc)]
