@@ -68,14 +68,19 @@ path, page)` (creates the sheet record; reports size, scale in force and
 the scale printed on the sheet, units, layers), `get_sheet_text`,
 `render_sheet(project, path, page, dpi, x, y, width, height, max_px)` →
 PNG + the pixel→point mapping, `list_layers`, `list_markups(sheet_id)`,
-`api_get(path)` (any GET).
+`list_symbols`, `api_get(path)` (any GET).
 
 Draft: `create_layer`, `create_markups(sheet_id, layer_id, markups,
 image_mapping)` (points in PDF points, or image pixels with the mapping
 `render_sheet` returned), `update_markup`, `delete_markups`,
-`set_sheet_scale` (needs publish rights).
+`clear_my_markups`, `set_sheet_scale` (needs publish rights).
 
 Typical flow: `list_projects` → `list_plan_sheets` → `get_sheet_info` →
 `render_sheet` (whole page at ~40 dpi to orient, then crops at 100–150
 dpi) → `create_markups` with the crop's `image_mapping` → the person
 reviews in the app.
+
+Stamps: `create_markups` with `kind: "stamp"`, `meta: {"symbol": id}` and
+`style: {"size": 18}` places a library glyph (ids from `list_symbols`);
+stamps count by `subject` like the Count tool. `clear_my_markups(layer_id,
+sheet_id)` withdraws this account's own markups on a layer in one call.

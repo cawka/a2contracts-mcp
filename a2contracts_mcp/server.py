@@ -191,6 +191,17 @@ def list_markups(sheet_id: int) -> str:
 
 
 @mcp.tool()
+def list_symbols() -> str:
+    """The stamp library: id, name, category for every symbol a 'stamp'
+    markup can place (meta.symbol). Electrical outlets/switches/lights,
+    HVAC, plumbing, safety, architectural, general."""
+    try:
+        return _ok(client().get('/api/plan-symbols/'))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
 def api_get(path: str, params: dict | None = None) -> str:
     """Read-only escape hatch: GET any /api/... path of the app as the
     signed-in user (projects, change-orders, payment-applications,
@@ -299,6 +310,22 @@ def delete_markups(markup_ids: list[int]) -> str:
         except Exception as exc:  # noqa: BLE001
             results.append({'id': mid, 'deleted': False, 'error': str(exc)})
     return _ok(results)
+
+
+@mcp.tool()
+def clear_my_markups(layer_id: int, sheet_id: int | None = None) -> str:
+    """Delete every markup of the signed-in user's own on a layer -- on one
+    sheet, or every sheet of the project when sheet_id is omitted. The way
+    to withdraw a batch of suggestions in one go (a person with publish
+    rights clearing the same way removes everything on the layer, so use
+    this account's own layer). Returns the deleted ids."""
+    body: dict = {'layer': layer_id}
+    if sheet_id is not None:
+        body['sheet'] = sheet_id
+    try:
+        return _ok(client().post('/api/plan-markups/clear/', json=body))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 @mcp.tool()
