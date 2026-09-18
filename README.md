@@ -116,6 +116,18 @@ image_mapping)` (points in PDF points, or image pixels with the mapping
 `render_sheet` returned), `update_markup`, `delete_markups`,
 `clear_my_markups`, `set_sheet_scale` (needs publish rights).
 
+Schedule (draft-mode by nature -- dates and sequencing, nothing
+financial): `get_schedule(project)` (every task incl. each line item's
+own row, every dependency), `update_schedule_tasks(updates)` (dates,
+duration, status, milestone flag, ignored, name), `create_milestones(
+project, items)`, `delete_schedule_tasks(ids)` (standalone rows only; a
+line item's task is `ignored`, never deleted), `set_dependencies(
+[{task, depends_on, dependency_type FS|SS|FF|SF, lag_days}])` (cycles
+refused by the app), `delete_dependencies(ids)`. Typical: `get_estimate`
++ `get_schedule` -> propose durations and an FS chain per trade -> one
+`update_schedule_tasks` + one `set_dependencies` -> the person reviews
+the Gantt in the app.
+
 Draft estimates: `get_estimate(project)` (divisions, line items, pending
 change orders, totals, and whether it is still editable),
 `create_division(project, name, items, csi_code)`, `update_division`,

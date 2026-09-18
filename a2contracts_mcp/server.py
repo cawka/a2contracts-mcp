@@ -404,6 +404,150 @@ def get_estimate(project: int) -> str:
         return _err(exc)
 
 
+# --- Schedule ------------------------------------------------------------------
+# Draft-mode work by nature (dates, sequencing, milestones -- nothing here
+# records a financial agreement), so the tools may write freely; the app's
+# own `schedule` RBAC area still decides per user.
+
+SCHEDULE_TASK_FIELDS = ('name', 'description', 'start_date', 'end_date', 'duration_days', 'is_milestone', 'status', 'ignored', 'sort_order')
+
+
+@mcp.tool()
+def get_schedule(project: int) -> str:
+    """The project's construction schedule: every task (id, name,
+    line_item + line_item_title when it is a line item's own work, else a
+    standalone milestone, start_date, end_date, duration_days,
+    is_milestone, status not_started|in_progress|done, ignored,
+    subcontract, sort_order) and every dependency (id, task, depends_on,
+    dependency_type FS|SS|FF|SF, lag_days). Listing keeps line-item rows
+    in sync automatically -- a task exists for each line item already.
+    Dates are ISO YYYY-MM-DD."""
+    try:
+        c = client()
+        tasks = c.get('/api/schedule-tasks/', params={'project': project})
+        deps = c.get('/api/schedule-task-dependencies/', params={'project': project})
+        keep = ('id', 'name', 'line_item', 'line_item_title', 'description', 'start_date', 'end_date', 'duration_days', 'is_milestone', 'status', 'ignored', 'subcontract', 'sort_order')
+        return _ok({
+            'project': project,
+            'tasks': [{k: t.get(k) for k in keep} for t in sorted(tasks, key=lambda t: (t.get('sort_order') or 0, t['id']))],
+            'dependencies': [{k: d.get(k) for k in ('id', 'task', 'depends_on', 'dependency_type', 'lag_days')} for d in deps],
+            'note': 'Unscheduled tasks have null dates. Set start_date + end_date (or start_date + duration_days); a milestone is a task with is_milestone true. Dependencies: FS = depends_on must finish before task starts (lag_days after).',
+        })
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def update_schedule_tasks(updates: list[dict]) -> str:
+    """Change several tasks at once. Each entry: {id, and any of name,
+    description, start_date, end_date, duration_days, is_milestone,
+    status, ignored, sort_order}. Returns the updated rows, plus errors
+    per id where one was refused."""
+    try:
+        c = client()
+        done, errors = [], []
+        for u in updates:
+            task_id = u.get('id')
+            patch = {k: v for k, v in u.items() if k in SCHEDULE_TASK_FIELDS}
+            if not task_id or not patch:
+                errors.append({'id': task_id, 'error': 'id and at least one field are required'})
+                continue
+            try:
+                done.append(c.patch(f'/api/schedule-tasks/{task_id}/', json=patch))
+            except ApiError as exc:
+                errors.append({'id': task_id, 'error': exc.detail, 'status': exc.status})
+        return _ok({'updated': done, 'errors': errors})
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def create_milestones(project: int, items: list[dict]) -> str:
+    """Add standalone schedule rows that aren't line items: milestones and
+    phases (permit issued, inspections, final walkthrough...). Each item:
+    {name, start_date?, end_date?, duration_days?, description?,
+    is_milestone? (default true)}."""
+    try:
+        c = client()
+        created = []
+        for it in items:
+            body = {'project': project, 'is_milestone': True, **{k: v for k, v in it.items() if k in SCHEDULE_TASK_FIELDS}}
+            created.append(c.post('/api/schedule-tasks/', json=body))
+        return _ok(created)
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def delete_schedule_tasks(ids: list[int]) -> str:
+    """Delete standalone milestones/phases. A line item's own task can't
+    be deleted (it is re-created from the estimate); mark it `ignored`
+    with update_schedule_tasks instead."""
+    try:
+        c = client()
+        deleted, errors = [], []
+        for task_id in ids:
+            try:
+                row = c.get(f'/api/schedule-tasks/{task_id}/')
+                if row.get('line_item'):
+                    errors.append({'id': task_id, 'error': "a line item's task -- set ignored instead"})
+                    continue
+                c.delete(f'/api/schedule-tasks/{task_id}/')
+                deleted.append(task_id)
+            except ApiError as exc:
+                errors.append({'id': task_id, 'error': exc.detail, 'status': exc.status})
+        return _ok({'deleted': deleted, 'errors': errors})
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def set_dependencies(dependencies: list[dict]) -> str:
+    """Link tasks. Each: {task, depends_on, dependency_type? FS|SS|FF|SF
+    (default FS), lag_days? (default 0)} -- `task` waits on `depends_on`.
+    A link that already exists is updated; a cycle is refused."""
+    try:
+        c = client()
+        existing = {}
+        results, errors = [], []
+        for d in dependencies:
+            task, depends_on = d.get('task'), d.get('depends_on')
+            if not task or not depends_on:
+                errors.append({'dependency': d, 'error': 'task and depends_on are required'})
+                continue
+            if task not in existing:
+                existing[task] = {row['depends_on']: row for row in c.get('/api/schedule-task-dependencies/', params={'task': task})}
+            body = {'task': task, 'depends_on': depends_on, 'dependency_type': d.get('dependency_type', 'FS'), 'lag_days': d.get('lag_days', 0)}
+            try:
+                prior = existing[task].get(depends_on)
+                if prior:
+                    results.append(c.patch(f"/api/schedule-task-dependencies/{prior['id']}/", json={'dependency_type': body['dependency_type'], 'lag_days': body['lag_days']}))
+                else:
+                    results.append(c.post('/api/schedule-task-dependencies/', json=body))
+            except ApiError as exc:
+                errors.append({'dependency': d, 'error': exc.detail, 'status': exc.status})
+        return _ok({'dependencies': results, 'errors': errors})
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def delete_dependencies(ids: list[int]) -> str:
+    """Remove dependency links by id (from get_schedule)."""
+    try:
+        c = client()
+        deleted, errors = [], []
+        for dep_id in ids:
+            try:
+                c.delete(f'/api/schedule-task-dependencies/{dep_id}/')
+                deleted.append(dep_id)
+            except ApiError as exc:
+                errors.append({'id': dep_id, 'error': exc.detail, 'status': exc.status})
+        return _ok({'deleted': deleted, 'errors': errors})
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
 @mcp.tool()
 def create_division(project: int, name: str, items: list[dict], csi_code: str = '', sort_order: int | None = None) -> str:
     """Add a division (a section of the estimate, e.g. csi_code "09",
